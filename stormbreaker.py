@@ -50,11 +50,13 @@ def get_battery_percentage() -> int:
     try:
         mouse.open_path(receiver["path"])
         mouse.write(battery_request())
-
         response = mouse.read(RESPONSE_LENGTH, timeout_ms=READ_TIMEOUT_MS)
         if not response:
             raise RuntimeError("Mouse did not respond.")
-
         return parse_battery_response(response)
+
+    except OSError as error:
+        raise RuntimeError(f"Error communicating with mouse: {error}")
+
     finally:
         mouse.close()
