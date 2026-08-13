@@ -1,9 +1,10 @@
 import pystray
+import time
 from pystray import MenuItem as Item
 from PIL import Image, ImageDraw
 from threading import Event
-
 from stormbreaker import get_battery_percentage
+from settings import is_startup, enable_startup, disable_startup
 
 
 def refresh_battery() -> str:
@@ -39,24 +40,44 @@ def battery_icon(level: int | None) -> Image.Image:
     return icon
 
 
-def update_tray(icon: pystray.Icon) -> None:
+def update_tray(icon) -> None:
+    global battery, last_alert
     icon.visible = True
+    last_alert = 0.0
     while not stop_event.is_set():
         battery = refresh_battery()
         level = int(battery[:-1]) if battery.endswith("%") else None
+        low_battery_alert(icon, level)
         icon.icon = battery_icon(level)
         icon.title = f"StormBreaker: {battery}"
+        icon.update_menu()
         stop_event.wait(60)
 
 
+def toggle_startup(icon, item) -> None:
+    if is_startup():
+        disable_startup()
+    else:
+        enable_startup()
+    icon.update_menu()
+
+def low_battery_alert(icon, level: int|None) -> None:
+    global last_alert
+    if level is not None and level <= 20 and time.monotonic() - last_alert >= 600:
+        icon.notify(f"Battery is {battery}", title="StormBreaker")
+        last_alert = time.monotonic()
+
 def main() -> None:
+    global battery
+    battery = "loading..."
     icon = pystray.Icon(
         None,
         battery_icon(None),
-        "StormBreaker: loading...",
+        f"StormBreaker: {battery}",
         menu=pystray.Menu(
-            Item(f"StormBreaker: {refresh_battery()}", None),
+            Item(lambda item: f"StormBreaker: {battery}", None),
             pystray.Menu.SEPARATOR,
+            Item('Launch on startup', toggle_startup, checked=lambda item: is_startup()),
             Item("Exit", exit_app)
         ),
     )
