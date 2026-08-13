@@ -1,4 +1,8 @@
 import hid
+import win32con
+import win32gui
+import time
+
 
 VID = 0x3662
 PID = 0x0002
@@ -43,7 +47,7 @@ def parse_battery_response(response: list[int]) -> int:
     return battery
 
 
-def get_battery_percentage() -> int:
+def get_battery_status() -> tuple[int, bool]:
     receiver = find_receiver()
     mouse = hid.device()
 
@@ -53,10 +57,45 @@ def get_battery_percentage() -> int:
         response = mouse.read(RESPONSE_LENGTH, timeout_ms=READ_TIMEOUT_MS)
         if not response:
             raise RuntimeError("Mouse did not respond.")
-        return parse_battery_response(response)
+        if len(response) < 10:
+            raise RuntimeError("Short response from mouse.")
+        return parse_battery_response(response), response[9] == 0x01
 
     except OSError as error:
         raise RuntimeError(f"Error communicating with mouse: {error}")
 
     finally:
         mouse.close()
+
+
+def get_battery_percentage() -> int:
+    return get_battery_status()[0]
+
+
+def is_charging() -> bool:
+    return get_battery_status()[1]
+
+def listen_for_device_changes(refresh_event) -> None:
+    def window_proc(hwnd, message, wparam, lparam):
+        if message == win32con.WM_DEVICECHANGE:
+            time.sleep(1)
+            refresh_event.set()
+
+        return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
+
+    window_class = win32gui.WNDCLASS()
+    window_class.lpfnWndProc = window_proc
+    window_class.lpszClassName = "StormBreakerDeviceChanges"
+
+    class_atom = win32gui.RegisterClass(window_class)
+
+    win32gui.CreateWindowEx(
+        0,
+        class_atom,
+        "StormBreakerDeviceChanges",
+        0,
+        0, 0, 0, 0,
+        0, 0, 0, None,
+    )
+
+    win32gui.PumpMessages()

@@ -1,17 +1,20 @@
 import pystray
 import time
+from pathlib import Path
 from pystray import MenuItem as Item
 from PIL import Image, ImageDraw
-from threading import Event
-from stormbreaker import get_battery_percentage
+from threading import Event, Thread
+from stormbreaker import get_battery_percentage, get_battery_status, is_charging, listen_for_device_changes
 from settings import is_startup, enable_startup, disable_startup
 
 
-def refresh_battery() -> str:
+def check_mouse_battery() -> str|tuple:
+    global battery_percent, charging
     try:
-        return f"{get_battery_percentage()}%"
+        battery_percent, charging = get_battery_status()
+        return f"{battery_percent}%", charging
     except RuntimeError as error:
-        return f"Error: {error}"
+        return f"Error: {error}", False
 
 
 def battery_color(level: int) -> tuple[int, int, int]:
@@ -26,8 +29,8 @@ def battery_color(level: int) -> tuple[int, int, int]:
 
 
 def battery_icon(level: int | None) -> Image.Image:
-    battery = Image.open("assets/Battery_dark.png").convert("RGBA")
-    mouse = Image.open("assets/Mouse_dark.png").convert("RGBA")
+    battery = Image.open(ASSETS / "Battery_dark.png").convert("RGBA")
+    mouse = Image.open(ASSETS / "Mouse_dark.png").convert("RGBA")
     icon = Image.new("RGBA", battery.size)
 
     if level is not None:
@@ -41,17 +44,20 @@ def battery_icon(level: int | None) -> Image.Image:
 
 
 def update_tray(icon) -> None:
-    global battery, last_alert
+    global charging, battery_percent, last_level
     icon.visible = True
-    last_alert = 0.0
     while not stop_event.is_set():
-        battery = refresh_battery()
-        level = int(battery[:-1]) if battery.endswith("%") else None
-        low_battery_alert(icon, level)
+        refresh_event.clear()
+        battery_percent, charging = check_mouse_battery()
+        level = int(battery_percent[:-1]) if battery_percent.endswith("%") else None
+        if not charging:
+            low_battery_alert(icon, level)
         icon.icon = battery_icon(level)
-        icon.title = f"StormBreaker: {battery}"
+        icon.title = f"{'Charging' if charging else 'Battery'}: {battery_percent}" if level is not None else "Loading..."
         icon.update_menu()
-        stop_event.wait(60)
+
+        refresh_event.wait(60)
+
 
 
 def toggle_startup(icon, item) -> None:
@@ -63,19 +69,17 @@ def toggle_startup(icon, item) -> None:
 
 def low_battery_alert(icon, level: int|None) -> None:
     global last_alert
-    if level is not None and level <= 20 and time.monotonic() - last_alert >= 600:
-        icon.notify(f"Battery is {battery}", title="StormBreaker")
+    if level is not None and 0 < level <= 20 and time.monotonic() - last_alert >= 600:
+        icon.notify(f"Battery is {battery_percent}", title="StormBreaker")
         last_alert = time.monotonic()
 
 def main() -> None:
-    global battery
-    battery = "loading..."
     icon = pystray.Icon(
         None,
         battery_icon(None),
-        f"StormBreaker: {battery}",
+        "Loading...",
         menu=pystray.Menu(
-            Item(lambda item: f"StormBreaker: {battery}", None),
+            Item(lambda item: f"{'Charging' if charging else 'Battery'}: {battery_percent}", None),
             pystray.Menu.SEPARATOR,
             Item('Launch on startup', toggle_startup, checked=lambda item: is_startup()),
             Item("Exit", exit_app)
@@ -85,11 +89,18 @@ def main() -> None:
 
 def exit_app(icon, item) -> None:
     stop_event.set()
+    refresh_event.set()
     icon.visible = False
     icon.stop()
 
+battery_percent = "loading..."
+charging = False
+last_alert = 0.0
+stop_event = Event()
+refresh_event = Event()
+ASSETS = Path(__file__).with_name("assets")
 
 
 if __name__ == "__main__":
-    stop_event = Event()
+    Thread(target=listen_for_device_changes, args=(refresh_event,), daemon=True).start()
     main()
