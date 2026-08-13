@@ -1,27 +1,25 @@
 # Pwnage StormBreaker Battery
 
-A lightweight Windows utility for reading and visualizing the battery level of a Pwnage StormBreaker mouse without running the official Pwnage software.
+A lightweight Windows tray utility that shows the battery level and charging state of a Pwnage StormBreaker mouse without running the official Pwnage software.
 
-## Plan
+## What it does
 
-The project has two main pieces:
+- Displays a battery-and-mouse tray icon with a proportional, colour-changing battery fill.
+- Shows the current percentage and charging state in the tray tooltip and menu.
+- Polls the confirmed HID status request every 60 seconds and refreshes early after Windows device-change events.
+- Shows a low-battery notification at 20% or below, then no more than once every 10 minutes while the mouse is not charging.
+- Provides a tray toggle for Windows launch-at-startup.
+
+## Project layout
 
 ```text
-stormbreaker.py  ->  HID/device communication
-app.py           ->  tray/UI visualization
+main.py          tray icon, polling, notifications, and startup menu
+stormbreaker.py  HID status request and Windows device-change listener
+settings.py      Windows Registry startup helpers
+assets/          tray artwork and application icon
 ```
 
-### `stormbreaker.py`
-
-Responsible for:
-
-- Discovering the StormBreaker receiver.
-- Opening the vendor-defined HID interface.
-- Sending the confirmed battery/status request.
-- Reading and validating the response.
-- Returning the battery percentage.
-
-Confirmed device:
+## Confirmed protocol
 
 ```text
 VID:        0x3662
@@ -31,67 +29,38 @@ Usage page: 0xFF1C
 Usage:      0x0092
 ```
 
-Confirmed 64-byte battery/status request:
+The only command sent is the confirmed 64-byte battery/status request:
 
 ```text
-04 20 00 1A 06 00 00 00 00 ...
+04 20 00 1A 06 00 00 00 ...
 ```
 
-The request checksum is stored little-endian in bytes `1-2` and is the sum of bytes `3..63`.
-
-Confirmed response fields:
+Bytes `1-2` are the little-endian sum of bytes `3-63`.
 
 ```text
 response[7] = status/error
-response[8] = battery percentage
+response[8] = battery percentage (0-100)
+response[9] = charging flag (0x01 = charging)
 ```
 
-Example: `response[8] == 0x62` means `98%`.
-
-### `app.py`
-
-Responsible for:
-
-- Displaying the current battery level.
-- Polling `stormbreaker.py` roughly every 30-60 seconds.
-- Showing disconnected, sleeping, unavailable, or error states cleanly.
-- Remaining as lightweight as possible.
-
-## Reliability
-
-The app should tolerate:
-
-- Receiver unplugged.
-- Mouse asleep/off.
-- HID timeouts.
-- Busy HID interface.
-- Short/malformed responses.
-- Invalid battery values.
-
-Temporary failures should not terminate the application.
-
-## Setup
+## Setup and run
 
 ```powershell
-py -m pip install hidapi
+py -m pip install hidapi pystray pillow pywin32
+py .\main.py
 ```
 
-Development currently targets Windows.
+The receiver may be unplugged or the mouse may be unavailable; the tray app should remain running and show `Loading...` until a valid reading is available.
 
-## Run
-
-During development:
+## Build
 
 ```powershell
-py .\app.py
+py -m pip install pyinstaller
+py -m PyInstaller --onefile --noconsole --name StormBreakerBattery --icon assets\pwnage-battery.ico --add-data "assets;assets" main.py
 ```
 
-The official Pwnage StormBreaker software should not be required.
+The executable is written to `dist\StormBreakerBattery.exe`.
 
-## Roadmap
+## Asset licensing
 
-1. Extract the working HID reader into `stormbreaker.py`.
-2. Add robust device/error handling.
-3. Build the minimal battery visualization in `app.py`.
-4. Add tray/background behavior.
-5. Package as a lightweight Windows executable.
+`Battery_dark.png` and `Mouse_dark.png` are reused from [LGSTrayBattery](https://github.com/andyvorld/LGSTrayBattery), which is licensed under GPL-3.0. Keep the project's distribution licensing compatible with GPL-3.0 when distributing those assets.

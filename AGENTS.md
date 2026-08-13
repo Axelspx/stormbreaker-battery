@@ -1,27 +1,18 @@
 # AGENTS.md
 
 ## Goal
-Build a small Windows utility that reads and visualizes the battery level of a Pwnage StormBreaker mouse without requiring the official Pwnage software.
+
+Maintain a small Windows tray utility that reads and visualizes the battery level and charging state of a Pwnage StormBreaker mouse without the official Pwnage software.
 
 ## Architecture
-Keep the project split into two main modules:
 
-- `stormbreaker.py` — all HID/device communication.
-- `app.py` — tray/UI visualization and polling.
+- `stormbreaker.py` — all StormBreaker HID communication and the Windows device-change listener.
+- `main.py` — tray icon, polling, battery notifications, and menu actions.
+- `settings.py` — Windows current-user startup Registry helpers.
 
-Do not put HID/protocol logic in `app.py`.
+Do not put HID/protocol logic in `main.py`. Do not send device commands from the UI other than the confirmed status request exposed by `stormbreaker.py`.
 
-## `stormbreaker.py`
-Responsibilities:
-
-- Find the StormBreaker receiver.
-- Open only the confirmed vendor HID interface.
-- Send the battery/status request.
-- Validate the response.
-- Return battery percentage as a simple value.
-- Raise or return clear errors for unavailable/invalid states.
-
-Confirmed device/protocol:
+## Confirmed device/protocol
 
 ```text
 VID:        0x3662
@@ -35,46 +26,36 @@ Usage:      0x0092
 
 response[7] = status/error
 response[8] = battery percentage (0-100)
+response[9] = charging flag (0x01 = charging)
 ```
 
 Request bytes `1-2` are the little-endian sum of bytes `3..63`.
 
-## `app.py`
-Responsibilities:
+## Current behavior
 
-- Display battery percentage clearly.
-- Poll `stormbreaker.py` every 30-60 seconds.
-- Show sensible disconnected/unavailable/error states.
-- Remain lightweight and unobtrusive.
-- Never duplicate HID/protocol implementation.
+- `get_battery_status()` returns `(percentage, is_charging)` from one status request.
+- `main.py` polls every 60 seconds and can wake early after any Windows `WM_DEVICECHANGE` notification.
+- Temporary read failures must not terminate the tray app.
+- The low-battery notification applies only at `1-20%` while not charging, then no more often than every 10 minutes.
+- `settings.py` supports enabling, disabling, and reading per-user launch-at-startup state.
 
-## Reliability
-Handle gracefully:
+## HID safety
 
-- Receiver unplugged.
-- Mouse asleep/off.
-- HID read timeout.
-- Interface already in use.
-- Malformed/short responses.
-- Battery values outside `0-100`.
-
-Do not crash the app for temporary device failures.
-
-## HID Safety
 - Target only VID `0x3662`, PID `0x0002`, usage page `0xFF1C`, usage `0x0092`.
-- Do not send undocumented commands.
-- Keep writes limited to the confirmed battery/status request.
+- Send only the confirmed battery/status request.
 - Do not modify DPI, polling rate, firmware, pairing, profiles, or device settings.
-- Avoid unnecessarily frequent polling/writes.
+- Keep polling infrequent unless a user explicitly changes the interval.
 
-## Development Rules
-- Prefer simple, readable Python over abstractions that are not needed.
-- Keep protocol constants named and centralized.
-- Keep functions small and testable.
-- Preserve the two-module boundary unless there is a strong reason to add a small supporting module.
-- Do not add unrelated features before the core battery reader and visualizer are reliable.
+## Development rules
 
-## Agent Replies
+- Prefer the smallest readable Python change; avoid speculative abstractions and dependencies.
+- Keep protocol constants centralized in `stormbreaker.py`.
+- Preserve the module boundaries above.
+- Verify non-trivial behavior with the smallest relevant local check.
+- The reused `Battery_dark.png` and `Mouse_dark.png` assets originate from GPL-3.0 LGSTrayBattery; keep distribution licensing compatible when distributing them.
+
+## Agent replies
+
 After code changes, report briefly:
 
 1. What changed.
